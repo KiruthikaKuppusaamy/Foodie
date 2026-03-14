@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   ShoppingBag, 
@@ -15,19 +15,57 @@ import {
   X, 
   ArrowLeft,
   MapPin,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  CheckCircle2,
+  Truck,
+  UtensilsCrossed,
+  PackageCheck,
+  Phone,
+  MessageSquare,
+  Navigation,
+  History,
+  CreditCard,
+  Wallet,
+  Banknote
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { io } from 'socket.io-client';
 import { RESTAURANTS, CATEGORIES } from './data';
-import { Restaurant, MenuItem, CartItem } from './types';
+import { Restaurant, MenuItem, CartItem, Order } from './types';
+
+const socket = io();
 
 export default function App() {
+  const [view, setView] = useState<'customer' | 'restaurant' | 'past-orders'>('customer');
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [orderStatus, setOrderStatus] = useState<'idle' | 'processing' | 'success'>('idle');
+  const [orderStatus, setOrderStatus] = useState<'idle' | 'processing' | 'confirmed' | 'preparing' | 'out-for-delivery' | 'delivered'>('idle');
+  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [pastOrders, setPastOrders] = useState<Order[]>(() => {
+    const saved = localStorage.getItem('pastOrders');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'upi' | 'cash'>('cash');
+
+  useEffect(() => {
+    localStorage.setItem('pastOrders', JSON.stringify(pastOrders));
+  }, [pastOrders]);
+
+  useEffect(() => {
+    socket.on('order_update', (data) => {
+      console.log('Received order update:', data);
+      if (activeOrder && data.orderId === activeOrder.id) {
+        setOrderStatus(data.status);
+      }
+    });
+
+    return () => {
+      socket.off('order_update');
+    };
+  }, [activeOrder]);
 
   const filteredRestaurants = useMemo(() => {
     return RESTAURANTS.filter(res => {
@@ -49,6 +87,31 @@ export default function App() {
     });
   };
 
+  const buyNow = (item: MenuItem, restaurantId: string) => {
+    if (orderStatus !== 'idle') return;
+    const restaurant = RESTAURANTS.find(r => r.id === restaurantId);
+    if (!restaurant) return;
+
+    const newOrder: Order = {
+      id: `QB-${Math.floor(Math.random() * 90000) + 10000}`,
+      items: [{ ...item, quantity: 1, restaurantId }],
+      total: item.price + restaurant.deliveryFee,
+      restaurant: restaurant,
+      timestamp: Date.now(),
+      status: 'processing',
+      paymentMethod: selectedPaymentMethod
+    };
+
+    setCart([]);
+    setOrderStatus('processing');
+    setSelectedRestaurant(restaurant);
+    setActiveOrder(newOrder);
+    
+    // Emit to server
+    socket.emit('place_order', newOrder);
+    setIsCartOpen(false);
+  };
+
   const removeFromCart = (itemId: string) => {
     if (orderStatus !== 'idle') return;
     setCart(prev => {
@@ -61,20 +124,467 @@ export default function App() {
   };
 
   const handleCheckout = () => {
+    if (!selectedRestaurant) return;
+    
+    const newOrder: Order = {
+      id: `QB-${Math.floor(Math.random() * 90000) + 10000}`,
+      items: [...cart],
+      total: cartTotal + selectedRestaurant.deliveryFee,
+      restaurant: selectedRestaurant,
+      timestamp: Date.now(),
+      status: 'processing',
+      paymentMethod: selectedPaymentMethod
+    };
+
     setOrderStatus('processing');
-    setTimeout(() => {
-      setOrderStatus('success');
-      setCart([]);
-      setTimeout(() => {
-        setOrderStatus('idle');
-        setIsCartOpen(false);
-        setSelectedRestaurant(null);
-      }, 3000);
-    }, 2000);
+    setActiveOrder(newOrder);
+    setCart([]);
+    setIsCartOpen(false);
+
+    // Emit to server
+    socket.emit('place_order', newOrder);
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const OrderTrackingView = () => {
+    if (!activeOrder) return null;
+
+    const steps = [
+      { id: 'confirmed', label: 'Confirmed', icon: CheckCircle2, description: 'Restaurant has accepted your order' },
+      { id: 'preparing', label: 'Preparing', icon: UtensilsCrossed, description: 'Chef is working their magic' },
+      { id: 'out-for-delivery', label: 'On the Way', icon: Truck, description: 'Courier is heading to you' },
+      { id: 'delivered', label: 'Delivered', icon: PackageCheck, description: 'Enjoy your meal!' },
+    ];
+
+    const currentStepIndex = steps.findIndex(s => s.id === orderStatus);
+
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-4xl mx-auto"
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          {/* Status Timeline */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white rounded-3xl border border-neutral-200 shadow-xl overflow-hidden">
+              <div className="p-6 bg-emerald-500 text-white">
+                <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mb-1">Order Status</p>
+                <h2 className="text-2xl font-bold mb-4">{activeOrder.id}</h2>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/20">
+                    <img src={activeOrder.restaurant.image} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="text-sm">
+                    <p className="font-bold">{activeOrder.restaurant.name}</p>
+                    <p className="text-emerald-100">{activeOrder.items.length} items • ₹{activeOrder.total.toFixed(2)}</p>
+                    <p className="text-[10px] text-emerald-100/80 uppercase tracking-widest mt-1 font-bold">
+                      Paid via {activeOrder.paymentMethod || 'Cash'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <div className="space-y-6">
+                  {steps.map((step, index) => {
+                    const isCompleted = index < currentStepIndex || orderStatus === 'delivered';
+                    const isActive = step.id === orderStatus;
+                    const Icon = step.icon;
+
+                    return (
+                      <div key={step.id} className="relative flex gap-4">
+                        {index !== steps.length - 1 && (
+                          <div className={`absolute left-5 top-10 bottom-[-16px] w-0.5 ${isCompleted ? 'bg-emerald-500' : 'bg-neutral-100'}`} />
+                        )}
+                        <div className={`relative z-10 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                          isCompleted ? 'bg-emerald-500 text-white' : 
+                          isActive ? 'bg-emerald-100 text-emerald-600 ring-4 ring-emerald-50' : 
+                          'bg-neutral-100 text-neutral-400'
+                        }`}>
+                          <Icon size={20} />
+                        </div>
+                        <div className="flex-1 pt-0.5">
+                          <h4 className={`text-sm font-bold ${isActive ? 'text-neutral-900' : isCompleted ? 'text-neutral-600' : 'text-neutral-400'}`}>
+                            {step.label}
+                          </h4>
+                          <p className="text-xs text-neutral-500">{step.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Delivery Partner */}
+            <AnimatePresence>
+              {(orderStatus === 'out-for-delivery' || orderStatus === 'delivered') && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white p-6 rounded-3xl border border-neutral-200 shadow-lg"
+                >
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-4">Delivery Partner</h3>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-neutral-100 overflow-hidden">
+                        <img src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=100&q=80" alt="Rider" className="w-full h-full object-cover" />
+                      </div>
+                      <div>
+                        <p className="font-bold">Rahul Sharma</p>
+                        <p className="text-xs text-neutral-500 flex items-center gap-1">
+                          <Star size={12} className="text-yellow-500 fill-yellow-500" /> 4.9 • 2k+ deliveries
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="p-3 bg-neutral-100 hover:bg-emerald-50 text-emerald-600 rounded-2xl transition-colors">
+                        <Phone size={18} />
+                      </button>
+                      <button className="p-3 bg-neutral-100 hover:bg-emerald-50 text-emerald-600 rounded-2xl transition-colors">
+                        <MessageSquare size={18} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Map Visualization */}
+          <div className="lg:col-span-3">
+            <div className="bg-white rounded-3xl border border-neutral-200 shadow-xl overflow-hidden h-full min-h-[400px] relative">
+              {/* Simulated Map Background */}
+              <div className="absolute inset-0 bg-[#f8f9fa] overflow-hidden">
+                {/* Grid Lines */}
+                <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+                
+                {/* Simulated Roads */}
+                <svg className="absolute inset-0 w-full h-full opacity-10" viewBox="0 0 400 400">
+                  <path d="M0 100 H400 M0 200 H400 M0 300 H400 M100 0 V400 M200 0 V400 M300 0 V400" stroke="black" strokeWidth="2" fill="none" />
+                </svg>
+
+                {/* Delivery Path */}
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 400 400">
+                  <motion.path 
+                    d="M100 300 L100 200 L300 200 L300 100" 
+                    stroke="#10b981" 
+                    strokeWidth="4" 
+                    strokeLinecap="round" 
+                    fill="none"
+                    initial={{ pathLength: 0 }}
+                    animate={{ pathLength: currentStepIndex / 3 }}
+                    transition={{ duration: 2 }}
+                  />
+                </svg>
+
+                {/* Restaurant Marker */}
+                <div className="absolute left-[100px] top-[300px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
+                  <div className="bg-white p-1 rounded-lg shadow-lg border border-neutral-200 mb-1">
+                    <div className="w-6 h-6 rounded bg-emerald-500 flex items-center justify-center text-white">
+                      <UtensilsCrossed size={14} />
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full shadow-sm border border-neutral-100 whitespace-nowrap">
+                    {activeOrder.restaurant.name}
+                  </span>
+                </div>
+
+                {/* Home Marker */}
+                <div className="absolute left-[300px] top-[100px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
+                  <div className="bg-white p-1 rounded-lg shadow-lg border border-neutral-200 mb-1">
+                    <div className="w-6 h-6 rounded bg-neutral-900 flex items-center justify-center text-white">
+                      <MapPin size={14} />
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded-full shadow-sm border border-neutral-100 whitespace-nowrap">
+                    Home
+                  </span>
+                </div>
+
+                {/* Moving Courier Marker */}
+                <AnimatePresence>
+                  {orderStatus === 'out-for-delivery' && (
+                    <motion.div 
+                      initial={{ left: '100px', top: '300px' }}
+                      animate={{ 
+                        left: ['100px', '100px', '300px', '300px'],
+                        top: ['300px', '200px', '200px', '100px']
+                      }}
+                      transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 z-20"
+                    >
+                      <div className="relative">
+                        <motion.div 
+                          animate={{ scale: [1, 1.5, 1] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                          className="absolute inset-0 bg-emerald-500/20 rounded-full"
+                        />
+                        <div className="bg-emerald-500 text-white p-2 rounded-full shadow-xl relative z-10">
+                          <Truck size={20} />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Delivered Marker */}
+                {orderStatus === 'delivered' && (
+                  <motion.div 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute left-[300px] top-[100px] -translate-x-1/2 -translate-y-1/2 z-30"
+                  >
+                    <div className="bg-emerald-600 text-white p-3 rounded-full shadow-2xl ring-8 ring-emerald-500/20">
+                      <PackageCheck size={24} />
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Map Overlay Info */}
+              <div className="absolute bottom-6 left-6 right-6 flex gap-4">
+                <div className="flex-1 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                    <Navigation size={20} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Current Location</p>
+                    <p className="text-sm font-bold">
+                      {orderStatus === 'out-for-delivery' ? 'Near Sector 42' : 
+                       orderStatus === 'delivered' ? 'At your doorstep' : 
+                       'At Restaurant'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {orderStatus === 'delivered' && (
+              <motion.button 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                onClick={() => {
+                  if (activeOrder) {
+                    setPastOrders(prev => [{ ...activeOrder, status: 'delivered' }, ...prev]);
+                  }
+                  setOrderStatus('idle');
+                  setActiveOrder(null);
+                  setSelectedRestaurant(null);
+                }}
+                className="w-full mt-6 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100"
+              >
+                Order Received
+              </motion.button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
+  const PastOrdersView = () => {
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-4xl mx-auto py-8"
+      >
+        <div className="flex items-center gap-4 mb-8">
+          <button 
+            onClick={() => setView('customer')}
+            className="p-2 hover:bg-neutral-200 rounded-full transition-colors"
+          >
+            <ArrowLeft size={24} />
+          </button>
+          <h1 className="text-3xl font-bold tracking-tight">Order History</h1>
+        </div>
+
+        {pastOrders.length === 0 ? (
+          <div className="bg-white rounded-3xl p-12 text-center border border-neutral-200">
+            <History size={64} className="mx-auto text-neutral-200 mb-4" />
+            <h3 className="text-xl font-bold text-neutral-400">No past orders yet</h3>
+            <button 
+              onClick={() => setView('customer')}
+              className="mt-6 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all"
+            >
+              Start Ordering
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {pastOrders.map(order => (
+              <div key={order.id} className="bg-white rounded-3xl border border-neutral-200 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/50">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl overflow-hidden border border-neutral-200">
+                      <img src={order.restaurant.image} alt="" className="w-full h-full object-cover" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg">{order.restaurant.name}</h3>
+                      <p className="text-xs text-neutral-500">
+                        {new Date(order.timestamp).toLocaleDateString()} at {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-lg">₹{order.total.toFixed(2)}</p>
+                    <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Delivered</p>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <div className="space-y-3">
+                    {order.items.map(item => (
+                      <div key={item.id} className="flex justify-between items-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-emerald-600">{item.quantity}x</span>
+                          <span className="text-neutral-700">{item.name}</span>
+                        </div>
+                        <span className="text-neutral-500">₹{(item.price * item.quantity).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-6 pt-6 border-t border-neutral-100 flex justify-between items-center">
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs text-neutral-400">Order ID: #{order.id}</p>
+                      <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
+                        Payment: {order.paymentMethod || 'Cash'}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        // Logic to reorder could go here
+                        setSelectedRestaurant(order.restaurant);
+                        setView('customer');
+                      }}
+                      className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-colors"
+                    >
+                      Order Again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    );
+  };
+
+  const RestaurantDashboard = () => {
+    const [orders, setOrders] = useState<any[]>([]);
+
+    useEffect(() => {
+      socket.emit('join_restaurant');
+      socket.on('active_orders', (data) => setOrders(data));
+      socket.on('new_order', (order) => setOrders(prev => [...prev, order]));
+      socket.on('order_update', (data) => {
+        setOrders(prev => prev.map(o => o.id === data.orderId ? { ...o, status: data.status } : o));
+      });
+
+      return () => {
+        socket.off('active_orders');
+        socket.off('new_order');
+        socket.off('order_update');
+      };
+    }, []);
+
+    const updateStatus = (orderId: string, status: string) => {
+      socket.emit('update_order_status', { orderId, status });
+    };
+
+    return (
+      <div className="max-w-6xl mx-auto py-12">
+        <div className="flex items-center justify-between mb-12">
+          <h1 className="text-4xl font-bold tracking-tight">Restaurant Dashboard</h1>
+          <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full font-bold">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Live Updates Active
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-8">
+          {orders.length === 0 ? (
+            <div className="bg-white rounded-3xl p-12 text-center border border-neutral-200">
+              <PackageCheck size={64} className="mx-auto text-neutral-200 mb-4" />
+              <h3 className="text-xl font-bold text-neutral-400">No active orders right now</h3>
+            </div>
+          ) : (
+            orders.map(order => (
+              <motion.div 
+                key={order.id}
+                layout
+                className="bg-white rounded-3xl border border-neutral-200 shadow-sm overflow-hidden"
+              >
+                <div className="p-6 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/50">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-emerald-600">
+                      <ShoppingBag size={24} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg">Order #{order.id}</h3>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-neutral-500">{order.items.length} items • ₹{order.total}</p>
+                        <span className="text-[10px] font-bold bg-neutral-200 text-neutral-600 px-2 py-0.5 rounded uppercase tracking-wider">
+                          {order.paymentMethod || 'Cash'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider ${
+                    order.status === 'delivered' ? 'bg-neutral-100 text-neutral-500' :
+                    order.status === 'out-for-delivery' ? 'bg-blue-100 text-blue-600' :
+                    'bg-emerald-100 text-emerald-600'
+                  }`}>
+                    {order.status}
+                  </div>
+                </div>
+                <div className="p-6 flex flex-wrap gap-4 items-center justify-between">
+                  <div className="flex gap-4">
+                    {order.items.map((item: any) => (
+                      <div key={item.id} className="flex items-center gap-2 bg-neutral-50 px-3 py-2 rounded-xl border border-neutral-100">
+                        <span className="font-bold text-emerald-600">{item.quantity}x</span>
+                        <span className="text-sm font-medium">{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => updateStatus(order.id, 'confirmed')}
+                      className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm font-bold hover:bg-neutral-800 transition-colors"
+                    >
+                      Confirm
+                    </button>
+                    <button 
+                      onClick={() => updateStatus(order.id, 'preparing')}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-colors"
+                    >
+                      Start Preparing
+                    </button>
+                    <button 
+                      onClick={() => updateStatus(order.id, 'out-for-delivery')}
+                      className="px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-bold hover:bg-blue-600 transition-colors"
+                    >
+                      Dispatch
+                    </button>
+                    <button 
+                      onClick={() => updateStatus(order.id, 'delivered')}
+                      className="px-4 py-2 rounded-xl bg-neutral-100 text-neutral-600 text-sm font-bold hover:bg-neutral-200 transition-colors"
+                    >
+                      Mark Delivered
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-neutral-50 font-sans text-neutral-900">
@@ -100,6 +610,19 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             <button 
+              onClick={() => setView('past-orders')}
+              className="p-2 hover:bg-neutral-100 rounded-full transition-colors text-neutral-600"
+              title="Order History"
+            >
+              <History size={24} />
+            </button>
+            <button 
+              onClick={() => setView(prev => prev === 'customer' ? 'restaurant' : 'customer')}
+              className="hidden md:flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-full text-xs font-bold transition-all"
+            >
+              {view === 'customer' ? 'Restaurant View' : 'Customer View'}
+            </button>
+            <button 
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 hover:bg-neutral-100 rounded-full transition-colors"
             >
@@ -116,7 +639,13 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         <AnimatePresence mode="wait">
-          {!selectedRestaurant ? (
+          {view === 'restaurant' ? (
+            <RestaurantDashboard key="restaurant-dashboard" />
+          ) : view === 'past-orders' ? (
+            <PastOrdersView key="past-orders" />
+          ) : activeOrder ? (
+            <OrderTrackingView key="tracking" />
+          ) : !selectedRestaurant ? (
             <motion.div
               key="home"
               initial={{ opacity: 0, y: 20 }}
@@ -145,30 +674,26 @@ export default function App() {
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
                     </div>
+                    
+                    <div className="flex flex-wrap gap-2 mt-4 max-w-xl">
+                      <button 
+                        onClick={() => setActiveCategory(null)}
+                        className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${!activeCategory ? 'bg-emerald-500 text-white' : 'bg-white/20 text-white hover:bg-white/30 backdrop-blur-md'}`}
+                      >
+                        All
+                      </button>
+                      {CATEGORIES.map(cat => (
+                        <button 
+                          key={cat.id}
+                          onClick={() => setActiveCategory(cat.name)}
+                          className={`px-4 py-2 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${activeCategory === cat.name ? 'bg-emerald-500 text-white' : 'bg-white/20 text-white hover:bg-white/30 backdrop-blur-md'}`}
+                        >
+                          <span>{cat.icon}</span>
+                          <span>{cat.name}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </section>
-
-              {/* Categories */}
-              <section className="mb-12 overflow-x-auto pb-4 scrollbar-hide">
-                <div className="flex gap-4">
-                  <button 
-                    onClick={() => setActiveCategory(null)}
-                    className={`flex flex-col items-center justify-center min-w-[80px] h-24 rounded-2xl transition-all ${!activeCategory ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-white hover:bg-neutral-100 border border-neutral-200'}`}
-                  >
-                    <span className="text-2xl mb-1">All</span>
-                    <span className="text-xs font-bold uppercase tracking-wider">Explore</span>
-                  </button>
-                  {CATEGORIES.map(cat => (
-                    <button 
-                      key={cat.id}
-                      onClick={() => setActiveCategory(cat.name)}
-                      className={`flex flex-col items-center justify-center min-w-[80px] h-24 rounded-2xl transition-all ${activeCategory === cat.name ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-white hover:bg-neutral-100 border border-neutral-200'}`}
-                    >
-                      <span className="text-2xl mb-1">{cat.icon}</span>
-                      <span className="text-xs font-bold uppercase tracking-wider">{cat.name}</span>
-                    </button>
-                  ))}
                 </div>
               </section>
 
@@ -206,7 +731,7 @@ export default function App() {
                           <div className="flex items-center gap-4 text-xs font-medium text-neutral-600">
                             <span className="flex items-center gap-1"><Clock size={14} /> {res.deliveryTime}</span>
                             <span>•</span>
-                            <span>${res.deliveryFee} delivery</span>
+                            <span>₹{res.deliveryFee} delivery</span>
                           </div>
                         </div>
                       </div>
@@ -271,13 +796,21 @@ export default function App() {
                                   <h4 className="font-bold text-lg mb-1">{item.name}</h4>
                                   <p className="text-sm text-neutral-500 mb-4 line-clamp-2">{item.description}</p>
                                   <div className="flex items-center justify-between">
-                                    <span className="font-bold text-emerald-600">${item.price}</span>
-                                    <button 
-                                      onClick={() => addToCart(item, selectedRestaurant.id)}
-                                      className="p-2 bg-neutral-100 hover:bg-emerald-500 hover:text-white rounded-xl transition-all"
-                                    >
-                                      <Plus size={18} />
-                                    </button>
+                                    <span className="font-bold text-emerald-600">₹{item.price}</span>
+                                    <div className="flex items-center gap-2">
+                                      <button 
+                                        onClick={() => buyNow(item, selectedRestaurant.id)}
+                                        className="px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-xl hover:bg-emerald-600 transition-all shadow-sm"
+                                      >
+                                        Buy Now
+                                      </button>
+                                      <button 
+                                        onClick={() => addToCart(item, selectedRestaurant.id)}
+                                        className="p-2 bg-neutral-100 hover:bg-emerald-500 hover:text-white rounded-xl transition-all"
+                                      >
+                                        <Plus size={18} />
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="w-24 h-24 rounded-xl overflow-hidden flex-shrink-0">
@@ -307,7 +840,7 @@ export default function App() {
                             <div key={item.id} className="flex items-center justify-between gap-4">
                               <div className="flex-1">
                                 <p className="font-bold text-sm">{item.name}</p>
-                                <p className="text-xs text-neutral-500">${item.price} each</p>
+                                <p className="text-xs text-neutral-500">₹{item.price} each</p>
                               </div>
                               <div className="flex items-center gap-3 bg-neutral-100 px-2 py-1 rounded-lg">
                                 <button onClick={() => removeFromCart(item.id)} className="hover:text-emerald-600 transition-colors">
@@ -324,15 +857,15 @@ export default function App() {
                         <div className="space-y-2 border-t border-neutral-100 pt-4 mb-6">
                           <div className="flex justify-between text-sm">
                             <span className="text-neutral-500">Subtotal</span>
-                            <span className="font-medium">${cartTotal.toFixed(2)}</span>
+                            <span className="font-medium">₹{cartTotal.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between text-sm">
                             <span className="text-neutral-500">Delivery Fee</span>
-                            <span className="font-medium">${selectedRestaurant.deliveryFee}</span>
+                            <span className="font-medium">₹{selectedRestaurant.deliveryFee}</span>
                           </div>
                           <div className="flex justify-between text-lg font-bold pt-2">
                             <span>Total</span>
-                            <span className="text-emerald-600">${(cartTotal + selectedRestaurant.deliveryFee).toFixed(2)}</span>
+                            <span className="text-emerald-600">₹{(cartTotal + selectedRestaurant.deliveryFee).toFixed(2)}</span>
                           </div>
                         </div>
                         <button 
@@ -340,11 +873,11 @@ export default function App() {
                           disabled={orderStatus !== 'idle'}
                           className={`w-full py-4 rounded-2xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${
                             orderStatus === 'processing' ? 'bg-neutral-200 text-neutral-500 cursor-not-allowed' :
-                            orderStatus === 'success' ? 'bg-emerald-600 text-white' :
+                            orderStatus !== 'idle' ? 'bg-emerald-600 text-white' :
                             'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-100'
                           }`}
                         >
-                          {orderStatus === 'processing' ? 'Processing...' : orderStatus === 'success' ? 'Order Placed!' : 'Checkout'}
+                          {orderStatus === 'processing' ? 'Processing...' : orderStatus !== 'idle' ? 'Order Placed!' : 'Checkout'}
                         </button>
                       </>
                     )}
@@ -409,7 +942,7 @@ export default function App() {
                         <div className="flex-1">
                           <div className="flex justify-between mb-1">
                             <h4 className="font-bold">{item.name}</h4>
-                            <span className="font-bold text-emerald-600">${(item.price * item.quantity).toFixed(2)}</span>
+                            <span className="font-bold text-emerald-600">₹{(item.price * item.quantity).toFixed(2)}</span>
                           </div>
                           <p className="text-xs text-neutral-500 mb-3 line-clamp-1">{item.description}</p>
                           <div className="flex items-center gap-3 bg-neutral-100 w-fit px-3 py-1 rounded-lg">
@@ -430,18 +963,42 @@ export default function App() {
 
               {cart.length > 0 && (
                 <div className="p-6 border-t border-neutral-100 bg-neutral-50">
+                  <div className="mb-6">
+                    <h4 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-4">Payment Method</h4>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { id: 'cash', label: 'Cash', icon: Banknote },
+                        { id: 'upi', label: 'UPI', icon: Wallet },
+                        { id: 'card', label: 'Card', icon: CreditCard },
+                      ].map((method) => (
+                        <button
+                          key={method.id}
+                          onClick={() => setSelectedPaymentMethod(method.id as any)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${
+                            selectedPaymentMethod === method.id
+                              ? 'border-emerald-500 bg-emerald-50 text-emerald-600'
+                              : 'border-neutral-200 bg-white text-neutral-400 hover:border-neutral-300'
+                          }`}
+                        >
+                          <method.icon size={20} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">{method.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="space-y-3 mb-6">
                     <div className="flex justify-between text-neutral-500">
                       <span>Subtotal</span>
-                      <span>${cartTotal.toFixed(2)}</span>
+                      <span>₹{cartTotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-neutral-500">
                       <span>Delivery Fee</span>
-                      <span>$2.99</span>
+                      <span>₹{cart[0]?.restaurantId ? RESTAURANTS.find(r => r.id === cart[0].restaurantId)?.deliveryFee : 0}</span>
                     </div>
                     <div className="flex justify-between text-xl font-bold pt-3 border-t border-neutral-200">
                       <span>Total</span>
-                      <span className="text-emerald-600">${(cartTotal + 2.99).toFixed(2)}</span>
+                      <span className="text-emerald-600">₹{(cartTotal + (cart[0]?.restaurantId ? (RESTAURANTS.find(r => r.id === cart[0].restaurantId)?.deliveryFee || 0) : 0)).toFixed(2)}</span>
                     </div>
                   </div>
                   <button 
@@ -449,7 +1006,7 @@ export default function App() {
                     disabled={orderStatus !== 'idle'}
                     className={`w-full py-4 rounded-2xl font-bold text-lg transition-all shadow-xl flex items-center justify-center gap-2 ${
                       orderStatus === 'processing' ? 'bg-neutral-200 text-neutral-500 cursor-not-allowed' :
-                      orderStatus === 'success' ? 'bg-emerald-600 text-white' :
+                      orderStatus !== 'idle' ? 'bg-emerald-600 text-white' :
                       'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-100'
                     }`}
                   >
@@ -460,37 +1017,13 @@ export default function App() {
                       >
                         <Clock size={20} />
                       </motion.div>
-                    ) : orderStatus === 'success' ? (
+                    ) : orderStatus !== 'idle' ? (
                       'Order Placed!'
                     ) : (
                       <>Place Order <ChevronRight size={20} /></>
                     )}
                   </button>
                 </div>
-              )}
-
-              {orderStatus === 'success' && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="absolute inset-0 bg-white z-[60] flex flex-col items-center justify-center p-8 text-center"
-                >
-                  <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-6">
-                    <Star size={40} className="fill-emerald-600" />
-                  </div>
-                  <h2 className="text-3xl font-bold mb-2 tracking-tight">Order Confirmed!</h2>
-                  <p className="text-neutral-500 mb-8">Your food is being prepared and will be with you shortly.</p>
-                  <div className="w-full bg-neutral-100 rounded-2xl p-4 text-left space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-neutral-500">Order ID</span>
-                      <span className="font-bold">#QB-82910</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-neutral-500">Estimated Delivery</span>
-                      <span className="font-bold">25-35 min</span>
-                    </div>
-                  </div>
-                </motion.div>
               )}
             </motion.div>
           </>

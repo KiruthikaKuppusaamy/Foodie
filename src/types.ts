@@ -29,3 +29,13 @@ export interface CartItem extends MenuItem {
   quantity: number;
   restaurantId: string;
 }
+
+export interface Order {
+  id: string;
+  items: CartItem[];
+  total: number;
+  restaurant: Restaurant;
+  timestamp: number;
+  status: string;
+  paymentMethod?: string;
+}
