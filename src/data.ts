@@ -1,4 +1,4 @@
-import { Restaurant, Category } from './types';
+import { Restaurant, Category, Promotion } from './types';
 
 export const CATEGORIES: Category[] = [
   { id: '1', name: 'Burger', icon: '🍔' },
@@ -104,5 +104,70 @@ export const RESTAURANTS: Restaurant[] = [
         category: 'Pasta'
       }
     ]
+  },
+  {
+    id: 'res-5',
+    name: 'Green Garden',
+    rating: 4.5,
+    deliveryTime: '15-25 min',
+    deliveryFee: 0,
+    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=800&q=80',
+    categories: ['Salad', 'Healthy'],
+    menu: [
+      {
+        id: 'm7',
+        name: 'Quinoa Bowl',
+        description: 'Organic quinoa with roasted vegetables and lemon tahini dressing.',
+        price: 299,
+        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
+        category: 'Salad'
+      }
+    ]
+  },
+  {
+    id: 'res-6',
+    name: 'Steakhouse Prime',
+    rating: 4.9,
+    deliveryTime: '45-60 min',
+    deliveryFee: 120,
+    image: 'https://images.unsplash.com/photo-1546241072-48010ad28c2c?auto=format&fit=crop&w=800&q=80',
+    categories: ['Steak', 'Fine Dining'],
+    menu: [
+      {
+        id: 'm8',
+        name: 'Ribeye Steak',
+        description: 'Prime ribeye steak served with garlic butter and mashed potatoes.',
+        price: 1299,
+        image: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80',
+        category: 'Main'
+      }
+    ]
+  }
+];
+
+export const PROMOTIONS: Promotion[] = [
+  {
+    id: 'p1',
+    title: '50% OFF',
+    subtitle: 'On your first order from Burger Haven',
+    image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=800&q=80',
+    color: 'bg-orange-500',
+    restaurantId: 'res-1'
+  },
+  {
+    id: 'p2',
+    title: 'Free Delivery',
+    subtitle: 'Enjoy zero delivery fee on all Sushi Zen orders',
+    image: 'https://images.unsplash.com/photo-1553621042-f6e147245754?auto=format&fit=crop&w=800&q=80',
+    color: 'bg-emerald-600',
+    restaurantId: 'res-3'
+  },
+  {
+    id: 'p3',
+    title: 'Weekend Special',
+    subtitle: 'Buy 1 Get 1 Free on all Pizza Roma classics',
+    image: 'https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?auto=format&fit=crop&w=800&q=80',
+    color: 'bg-red-600',
+    restaurantId: 'res-2'
   }
 ];

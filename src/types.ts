@@ -39,3 +39,12 @@ export interface Order {
   status: string;
   paymentMethod?: string;
 }
+
+export interface Promotion {
+  id: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  color: string;
+  restaurantId?: string;
+}

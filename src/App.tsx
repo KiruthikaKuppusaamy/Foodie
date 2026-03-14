@@ -30,8 +30,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io } from 'socket.io-client';
-import { RESTAURANTS, CATEGORIES } from './data';
-import { Restaurant, MenuItem, CartItem, Order } from './types';
+import { RESTAURANTS, CATEGORIES, PROMOTIONS } from './data';
+import { Restaurant, MenuItem, CartItem, Order, Promotion } from './types';
 
 const socket = io();
 
@@ -49,6 +49,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'upi' | 'cash'>('cash');
+  const [activeDeliveryFilter, setActiveDeliveryFilter] = useState<number | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('pastOrders', JSON.stringify(pastOrders));
@@ -72,9 +74,11 @@ export default function App() {
       const matchesSearch = res.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           res.categories.some(c => c.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = !activeCategory || res.categories.includes(activeCategory);
-      return matchesSearch && matchesCategory;
+      const matchesDelivery = activeDeliveryFilter === null || 
+                             (activeDeliveryFilter === 0 ? res.deliveryFee === 0 : res.deliveryFee <= activeDeliveryFilter);
+      return matchesSearch && matchesCategory && matchesDelivery;
     });
-  }, [searchQuery, activeCategory]);
+  }, [searchQuery, activeCategory, activeDeliveryFilter]);
 
   const addToCart = (item: MenuItem, restaurantId: string) => {
     if (orderStatus !== 'idle') return;
@@ -474,6 +478,95 @@ export default function App() {
     );
   };
 
+  const PromoCarousel = () => {
+    const [currentIndex, setCurrentIndex] = useState(0);
+
+    useEffect(() => {
+      const timer = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % PROMOTIONS.length);
+      }, 5000);
+      return () => clearInterval(timer);
+    }, []);
+
+    return (
+      <div className="relative h-48 md:h-64 rounded-3xl overflow-hidden mb-12 shadow-lg">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={PROMOTIONS[currentIndex].id}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -50 }}
+            transition={{ duration: 0.5 }}
+            className={`absolute inset-0 ${PROMOTIONS[currentIndex].color} flex items-center`}
+          >
+            <div className="flex-1 px-8 md:px-16 z-10">
+              <motion.span 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-bold text-white uppercase tracking-widest mb-4"
+              >
+                Limited Time Offer
+              </motion.span>
+              <motion.h2 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="text-3xl md:text-5xl font-black text-white mb-2 leading-tight"
+              >
+                {PROMOTIONS[currentIndex].title}
+              </motion.h2>
+              <motion.p 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="text-white/80 text-sm md:text-lg font-medium mb-6 max-w-md"
+              >
+                {PROMOTIONS[currentIndex].subtitle}
+              </motion.p>
+              <motion.button
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                onClick={() => {
+                  const resId = PROMOTIONS[currentIndex].restaurantId;
+                  if (resId) {
+                    const res = RESTAURANTS.find(r => r.id === resId);
+                    if (res) setSelectedRestaurant(res);
+                  }
+                }}
+                className="px-6 py-3 bg-white text-neutral-900 rounded-2xl font-bold text-sm hover:bg-neutral-100 transition-all shadow-xl"
+              >
+                Order Now
+              </motion.button>
+            </div>
+            <div className="absolute right-0 top-0 bottom-0 w-1/2 md:w-2/5 overflow-hidden">
+              <img 
+                src={PROMOTIONS[currentIndex].image} 
+                alt="" 
+                className="w-full h-full object-cover opacity-80"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-inherit to-transparent" />
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Indicators */}
+        <div className="absolute bottom-6 left-8 md:left-16 flex gap-2 z-20">
+          {PROMOTIONS.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentIndex(idx)}
+              className={`h-1.5 rounded-full transition-all duration-300 ${
+                currentIndex === idx ? 'w-8 bg-white' : 'w-2 bg-white/40'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const RestaurantDashboard = () => {
     const [orders, setOrders] = useState<any[]>([]);
 
@@ -592,30 +685,47 @@ export default function App() {
       <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button className="p-2 hover:bg-neutral-100 rounded-full lg:hidden">
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-2 hover:bg-neutral-100 rounded-full md:hidden"
+            >
               <MenuIcon size={20} />
             </button>
             <div 
               className="text-2xl font-bold tracking-tighter text-emerald-600 cursor-pointer"
-              onClick={() => setSelectedRestaurant(null)}
+              onClick={() => {
+                setSelectedRestaurant(null);
+                setView('customer');
+              }}
             >
               QuickBite
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-sm font-medium text-neutral-500 bg-neutral-100 px-4 py-2 rounded-full">
+          <div className="hidden md:flex items-center gap-6">
+            <button 
+              onClick={() => {
+                setSelectedRestaurant(null);
+                setView('customer');
+              }}
+              className={`text-sm font-bold transition-colors ${view === 'customer' && !selectedRestaurant ? 'text-emerald-600' : 'text-neutral-500 hover:text-emerald-600'}`}
+            >
+              Home
+            </button>
+            <button 
+              onClick={() => setView('past-orders')}
+              className={`text-sm font-bold transition-colors ${view === 'past-orders' ? 'text-emerald-600' : 'text-neutral-500 hover:text-emerald-600'}`}
+            >
+              My Orders
+            </button>
+          </div>
+
+          <div className="hidden lg:flex items-center gap-2 text-sm font-medium text-neutral-500 bg-neutral-100 px-4 py-2 rounded-full">
             <MapPin size={16} className="text-emerald-500" />
             <span>Deliver to: <span className="text-neutral-900">123 Tech Avenue, Silicon Valley</span></span>
           </div>
 
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setView('past-orders')}
-              className="p-2 hover:bg-neutral-100 rounded-full transition-colors text-neutral-600"
-              title="Order History"
-            >
-              <History size={24} />
-            </button>
             <button 
               onClick={() => setView(prev => prev === 'customer' ? 'restaurant' : 'customer')}
               className="hidden md:flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-full text-xs font-bold transition-all"
@@ -637,6 +747,66 @@ export default function App() {
         </div>
       </nav>
 
+      {/* Mobile Menu */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black/50 z-50 backdrop-blur-sm md:hidden"
+            />
+            <motion.div 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              className="fixed top-0 left-0 bottom-0 w-64 bg-white z-50 shadow-2xl md:hidden p-6"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="text-xl font-bold tracking-tighter text-emerald-600">QuickBite</div>
+                <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 hover:bg-neutral-100 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <button 
+                  onClick={() => {
+                    setSelectedRestaurant(null);
+                    setView('customer');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-colors ${view === 'customer' && !selectedRestaurant ? 'bg-emerald-50 text-emerald-600' : 'text-neutral-600 hover:bg-neutral-50'}`}
+                >
+                  Home
+                </button>
+                <button 
+                  onClick={() => {
+                    setView('past-orders');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-colors ${view === 'past-orders' ? 'bg-emerald-50 text-emerald-600' : 'text-neutral-600 hover:bg-neutral-50'}`}
+                >
+                  My Orders
+                </button>
+                <div className="pt-4 border-t border-neutral-100">
+                  <button 
+                    onClick={() => {
+                      setView(prev => prev === 'customer' ? 'restaurant' : 'customer');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-3 bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs font-bold transition-all"
+                  >
+                    {view === 'customer' ? 'Switch to Restaurant View' : 'Switch to Customer View'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <main className="max-w-7xl mx-auto px-4 py-8">
         <AnimatePresence mode="wait">
           {view === 'restaurant' ? (
@@ -652,6 +822,8 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
             >
+              <PromoCarousel />
+
               {/* Hero Section */}
               <section className="mb-12">
                 <div className="relative h-64 md:h-80 rounded-3xl overflow-hidden bg-neutral-900">
@@ -693,6 +865,25 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+
+                    <div className="flex flex-wrap gap-2 mt-3 max-w-xl">
+                      <span className="text-white/60 text-xs font-bold uppercase tracking-wider flex items-center mr-2">Delivery:</span>
+                      {[
+                        { label: 'All', value: null },
+                        { label: 'Free', value: 0 },
+                        { label: 'Under ₹50', value: 50 },
+                        { label: 'Under ₹100', value: 100 },
+                      ].map(filter => (
+                        <button 
+                          key={filter.label}
+                          onClick={() => setActiveDeliveryFilter(filter.value)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeDeliveryFilter === filter.value ? 'bg-white text-emerald-600' : 'bg-white/10 text-white hover:bg-white/20 backdrop-blur-md'}`}
+                        >
+                          {filter.value === 0 && <Truck size={14} />}
+                          {filter.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </section>
@@ -706,37 +897,68 @@ export default function App() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {filteredRestaurants.map(res => (
-                    <motion.div 
-                      key={res.id}
-                      whileHover={{ y: -8 }}
-                      className="group cursor-pointer"
-                      onClick={() => setSelectedRestaurant(res)}
-                    >
-                      <div className="relative aspect-[16/10] rounded-3xl overflow-hidden mb-4 shadow-sm group-hover:shadow-xl transition-all">
-                        <img 
-                          src={res.image} 
-                          alt={res.name} 
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        />
-                        <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                          <Star size={12} className="text-yellow-500 fill-yellow-500" />
-                          {res.rating}
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h3 className="text-lg font-bold mb-1">{res.name}</h3>
-                          <p className="text-sm text-neutral-500 mb-2">{res.categories.join(' • ')}</p>
-                          <div className="flex items-center gap-4 text-xs font-medium text-neutral-600">
-                            <span className="flex items-center gap-1"><Clock size={14} /> {res.deliveryTime}</span>
-                            <span>•</span>
-                            <span>₹{res.deliveryFee} delivery</span>
+                  {filteredRestaurants.length > 0 ? (
+                    filteredRestaurants.map(res => (
+                      <motion.div 
+                        key={res.id}
+                        whileHover={{ y: -8 }}
+                        className="group cursor-pointer"
+                        onClick={() => setSelectedRestaurant(res)}
+                      >
+                        <div className="relative aspect-[16/10] rounded-3xl overflow-hidden mb-4 shadow-sm group-hover:shadow-xl transition-all">
+                          <img 
+                            src={res.image} 
+                            alt={res.name} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                          <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                            <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                            {res.rating}
                           </div>
                         </div>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h3 className="text-lg font-bold mb-1">{res.name}</h3>
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {res.categories.map(cat => (
+                                <span 
+                                  key={cat} 
+                                  className="px-2 py-0.5 bg-neutral-100 text-neutral-500 rounded-md text-[10px] font-bold uppercase tracking-wider"
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs font-medium text-neutral-600">
+                              <span className="flex items-center gap-1"><Clock size={14} /> {res.deliveryTime}</span>
+                              <span>•</span>
+                              <span className={res.deliveryFee === 0 ? 'text-emerald-600 font-bold' : ''}>
+                                {res.deliveryFee === 0 ? 'Free delivery' : `₹${res.deliveryFee} delivery`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="col-span-full py-12 text-center">
+                      <div className="w-20 h-20 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4 text-neutral-400">
+                        <UtensilsCrossed size={40} />
                       </div>
-                    </motion.div>
-                  ))}
+                      <h3 className="text-xl font-bold mb-2">No restaurants found</h3>
+                      <p className="text-neutral-500">Try adjusting your filters or search query</p>
+                      <button 
+                        onClick={() => {
+                          setSearchQuery('');
+                          setActiveCategory(null);
+                          setActiveDeliveryFilter(null);
+                        }}
+                        className="mt-4 text-emerald-600 font-bold hover:underline"
+                      >
+                        Clear all filters
+                      </button>
+                    </div>
+                  )}
                 </div>
               </section>
             </motion.div>
